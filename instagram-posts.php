@@ -14,7 +14,9 @@ class Plugin {
 
 
     protected $option_slug = 'igm_posts';
-    protected $custom_field = 'instagram';
+    protected $custom_field = 'instagram_url';
+
+    protected $post_metas = [];
 
 
     public function __construct() {
@@ -22,7 +24,7 @@ class Plugin {
         register_activation_hook( __FILE__, array( $this, 'activate' ) );
         register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 
-        add_action( 'update_postmeta', [ $this, 'update' ], 12, 4 );
+        add_action( 'admin_init', [ $this, 'admin_init' ], 9, 2 );
 
     }
 
@@ -37,48 +39,83 @@ class Plugin {
     }
 
 
-    public function update( $meta_id, $post_id, $meta_key, $meta_value ) {
+    public function admin_init() {
 
-        if ( $meta_key == $this->custom_field ) {
-            
-            $matches = [];
-            if ( preg_match( "/^https?:\/\/www\.instagram\.com\/p\/((?:[0-9]|[A-zA-Z]|_|-)+)\/?/", $meta_value, $matches ) ) {
+        if ( array_key_exists('action', $_REQUEST) && $_REQUEST['action']=='editpost' ) {
 
-                $res = wp_remote_get( $meta_value );
+            if ( array_key_exists('post_ID', $_REQUEST) ) {
 
-                if ( $res && ! is_wp_error($res) && $res['response']['code']==200 ) {
+                $post_id = intval( $_REQUEST['post_ID'] );
+
+                $meta_value = get_post_meta( $post_id, $this->custom_field, true );
+                $this->post_metas[ $this->custom_field ] = $meta_value;
+                add_action( 'save_post', [ $this, 'after_update_post' ], 11, 3 );
+
+
+            }
+
+        }
+
+    }
+
+
+    public function after_update_post( $post_id, $post, $update ) {
+
+        $meta_value = get_post_meta( $post_id, $this->custom_field, true );
+        $meta_value_before = $this->post_metas[ $this->custom_field ];
+
+        if ( $meta_value != $meta_value_before ) {
+            remove_action( 'save_post', [ $this, 'after_update_post' ], 11, 3 );
+            $this->update( $post_id, $this->custom_field, $meta_value );
+        }
+
+    }
+
+
+    protected function update( $post_id, $meta_key, $meta_value ) {
+
+        $matches = [];
+        if ( preg_match( "/^https?:\/\/www\.instagram\.com\/p\/((?:[0-9]|[A-zA-Z]|_|-)+)\/?/", $meta_value, $matches ) ) {
+
+            $res = wp_remote_get( $meta_value );
+
+            if ( $res && ! is_wp_error($res) && $res['response']['code']==200 ) {
+                
+                $html = $res['body'];
+                $matches = [];
+                
+                if ( preg_match( "/window\._sharedData\s=\s({.*});\s?<\/script>/", $html, $matches ) ) {
+
+                    $jsdata = json_decode( $matches[1] );
+                    @$igmdata = $jsdata->entry_data->PostPage[0]->media;
                     
-                    $html = $res['body'];
-                    $matches = [];
-                    
-                    if ( preg_match( "/window\._sharedData\s=\s({.*});\s?<\/script>/", $html, $matches ) ) {
+                    if ( $igmdata ) {
 
-                        $jsdata = json_decode( $matches[1] );
-                        @$igmdata = $jsdata->entry_data->PostPage[0]->media;
+                        $caption = isset( $igmdata->caption ) ? $igmdata->caption : '';
 
-                        if ( $igmdata ) {
+                        $data = [
+                            'ID' => $post_id,
+                            'post_title' =>  $caption,
+                            'post_content' => $caption,
+                            'post_date' => date( 'Y-m-d H:i:s', $igmdata->date )
+                        ];
 
-                           wp_update_post([
-                                'ID' => $post_id,
-                                'post_title' => $igmdata->caption,
-                                'post_content' => $igmdata->caption,
-                                'post_date' => date( 'Y-m-d H:i:s', $igmdata->date )
-                            ]);
+                        wp_update_post( $data );
 
-                           // DOWNLOAD IMAGE AND ASSIGN AS THUMBNAIL
-                           $attach_id = $this->download_media( $igmdata, $post_id );
+                       // DOWNLOAD IMAGE AND ASSIGN AS THUMBNAIL
+                       $attach_id = $this->download_media( $igmdata, $post_id );
 
-                           if ( $attach_id ) {
-                                update_post_meta( $attach_id, '_igm_id', $igmdata->id );
-                                set_post_thumbnail( $post_id, $attach_id );
-                            }
-
-                            //TODO set format
-                                                   
+                       if ( $attach_id ) {
+                            update_post_meta( $attach_id, '_igm_id', $igmdata->id );
+                            set_post_thumbnail( $post_id, $attach_id );
                         }
 
+                        //TODO set format
+                        
                     }
+
                 }
+
             }
 
         }
