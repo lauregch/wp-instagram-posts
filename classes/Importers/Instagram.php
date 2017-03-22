@@ -15,7 +15,7 @@ class Instagram extends Importer {
     static protected $pattern = "/^https?:\/\/www\.instagram\.com\/p\/((?:[0-9]|[A-zA-Z]|_|-)+)\/?/";
 
 
-    public function scrape( $html ) {
+    public function scrape( $url, $html ) {
 
         $data = new WP_Error();
 

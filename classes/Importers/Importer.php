@@ -30,7 +30,7 @@ abstract class Importer {
                 
                 $html = $res['body'];
                 
-                $data = $this->scrape( $html );
+                $data = $this->scrape( $url, $html );
                 _log($data);
 
                 if ( ! is_wp_error($data) ) {
@@ -44,10 +44,14 @@ abstract class Importer {
                     update_post_meta( $post_id, self::$meta_key, $data[Fields::ID] );
 
                    // DOWNLOAD IMAGE AND ASSIGN AS THUMBNAIL
-                   $attach_id = $this->get_main_media( $data[Fields::Image], $data[Fields::ID], $post_id );
-                   if ( $attach_id ) {
-                        update_post_meta( $attach_id, self::$meta_key, $data[Fields::ID] );
-                        set_post_thumbnail( $post_id, $attach_id );
+                    if ( array_key_exists( Fields::Image, $data ) ) {
+
+                        $attach_id = $this->get_main_media( $data[Fields::Image], $data[Fields::ID], $post_id );
+                        if ( $attach_id ) {
+                            update_post_meta( $attach_id, self::$meta_key, $data[Fields::ID] );
+                            set_post_thumbnail( $post_id, $attach_id );
+                        }
+
                     }
 
                     // SET FORMAT
@@ -67,7 +71,7 @@ abstract class Importer {
     protected function map_fields( $data ) {
 
         return [
-            'post_title' => $data[ Fields::Content ],
+            'post_title' => array_key_exists( Fields::Title, $data ) && $data[ Fields::Title ] ? $data[ Fields::Title ] : $data[ Fields::Content ],
             'post_content' => $data[ Fields::Content ],
             'post_date' => $data[ Fields::Date ]
         ];
@@ -103,6 +107,9 @@ abstract class Importer {
         return $attach_id;
 
     }
+
+
+    abstract protected function scrape( $url, $html );
 
 
     protected function get_format() {
